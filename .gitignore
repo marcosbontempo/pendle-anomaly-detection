@@ -1,3 +1,4 @@
 .env
 venv
 src/__pycache__/
+src/known_cex_wallets.json
