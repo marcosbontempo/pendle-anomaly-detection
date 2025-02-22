@@ -24,8 +24,6 @@ while True:
             time.sleep(5)
             continue
 
-        print(f"🔄 Checking transactions from block {latest_block} to {current_block}")
-
         logs = web3.eth.get_logs({
             "fromBlock": latest_block,
             "toBlock": current_block,

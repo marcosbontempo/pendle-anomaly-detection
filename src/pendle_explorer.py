@@ -1,7 +1,8 @@
 import os
 import json
-from dotenv import load_dotenv, find_dotenv
+import time
 from web3 import Web3
+from dotenv import load_dotenv, find_dotenv
 
 # Load .env from the parent directory
 load_dotenv(find_dotenv("../.env"))
@@ -16,65 +17,61 @@ if not web3.is_connected():
 print("✅ Connected to Ethereum/Arbitrum RPC!")
 
 PENDLE_CONTRACT_ADDRESS = "0x0c880f6761F1af8d9Aa9C466984b80DAb9a8c9e8"
+TRANSFER_EVENT_SIGNATURE = Web3.keccak(text="Transfer(address,address,uint256)").hex()  # Gerar hash correto
 
-# Correct ERC-20 Transfer event ABI
-ABI = json.loads("""
-[
-    {
-        "anonymous": false,
-        "inputs": [
-            {"indexed": true, "internalType": "address", "name": "from", "type": "address"},
-            {"indexed": true, "internalType": "address", "name": "to", "type": "address"},
-            {"indexed": false, "internalType": "uint256", "name": "value", "type": "uint256"}
-        ],
-        "name": "Transfer",
-        "type": "event"
-    }
-]
-""")
-
-pendle_contract = web3.eth.contract(address=PENDLE_CONTRACT_ADDRESS, abi=ABI)
-
-def handle_event(event):
-    tx_hash = event["transactionHash"].hex()
-    from_address = event["args"]["from"]
-    to_address = event["args"]["to"]
-    amount = web3.from_wei(event["args"]["value"], "ether")
-
-    print(f"🚀 New Pendle Transaction 🚀")
-    print(f"🔹 From: {from_address}")
-    print(f"🔹 To: {to_address}")
-    print(f"🔹 Amount: {amount} PENDLE")
-    print(f"🔹 TX Hash: {tx_hash}")
-    print("-" * 50)
+latest_block = web3.eth.block_number  # Start from the latest block
 
 print("📡 Monitoring Pendle transactions...")
 
-latest_block = web3.eth.block_number
-
 while True:
     try:
+        current_block = web3.eth.block_number  # Get the latest block number
+
+        if current_block <= latest_block:
+            time.sleep(5)
+            continue
+
+        #print(f"🔄 Checking transactions from block {latest_block} to {current_block}")
+
         logs = web3.eth.get_logs({
             "fromBlock": latest_block,
-            "toBlock": "latest",
+            "toBlock": current_block,
             "address": PENDLE_CONTRACT_ADDRESS
         })
-        
-        for log in logs:
-            print(f"🔎 Raw Event Log: {log}")  # Print full log to debug
 
-            if log["topics"]:
-                event_signature_received = log["topics"][0].hex()
-                print(f"📜 Received Event Signature: {event_signature_received}")
+        if logs:
+            for log in logs:
+                try:
+                    event_signature_received = log["topics"][0].hex()
 
-            try:
-                event_data = pendle_contract.events.Transfer().process_log(log)
-                handle_event(event_data)
-            except Exception as e:
-                print(f"⚠️ Error processing log: {e}")
+                    if event_signature_received.lower() == TRANSFER_EVENT_SIGNATURE.lower():
+                        from_address = "0x" + log["topics"][1].hex()[-40:]
+                        to_address = "0x" + log["topics"][2].hex()[-40:]
 
-        latest_block = web3.eth.block_number
+                        amount = int(log["data"].hex(), 16)  # Convert from Hex to int
+                        amount_pendle = web3.from_wei(amount, "ether")  # Converter para unidades corretas
+
+                        print(f"✅ New Transfer Event:")
+                        print(f"  - From: {from_address}")
+                        print(f"  - To: {to_address}")
+                        print(f"  - Value: {amount_pendle} PENDLE")
+                        print("-" * 50)
+
+                    #else:
+                    #    print(f"⚠️ Unknown Event Signature: {event_signature_received}")
+                    #    print(f"🔎 RAW LOG DATA: {log}")
+
+                except Exception as e:
+                    print(f"⚠️ Error processing log: {e}")
+                    print(f"🔍 RAW LOG: {log}")  # Print raw log for debugging
+
+        #else:
+        #    print("⚠️ No new transactions found.")
+
+        latest_block = current_block + 1  # Move to the next block
+
+        time.sleep(5)  # Avoid overloading RPC
 
     except Exception as e:
         print(f"⚠️ Error fetching logs: {e}")
-
+        time.sleep(10)  
